@@ -10,7 +10,7 @@ const segmentSchema = new mongoose.Schema(
 );
 
 const transcriptionSchema = new mongoose.Schema({
-  videoId: { type: Schema.Types.ObjectId, ref: "Video", required: true },
+  videoId: { type: mongoose.Schema.Types.ObjectId, ref: "Video", required: true },
   fullText: { type: String },
   segments: [segmentSchema],
   generatedDate: { type: Date, default: Date.now },

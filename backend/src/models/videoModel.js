@@ -15,8 +15,11 @@ const videoSchema = new mongoose.Schema({
     ],
     default: "uploaded",
   },
-  transcriptionId: { type: Schema.Types.ObjectId, ref: "Transcription" },
-  mcqs: [{ type: Schema.Types.ObjectId, ref: "MCQ" }],
+  transcriptionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Transcription",
+  },
+  mcqs: [{ type: mongoose.Schema.Types.ObjectId, ref: "MCQ" }],
   errorMessage: { type: String },
   uploadDate: { type: Date, default: Date.now },
 });

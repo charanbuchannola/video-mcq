@@ -1,7 +1,11 @@
 const mongoose = require("mongoose");
 
 const mcqSchema = new mongoose.Schema({
-  videoId: { type: Schema.Types.ObjectId, ref: "Video", required: true },
+  videoId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Video",
+    required: true,
+  },
   segmentStartTime: { type: Number, required: true },
   segmentEndTime: { type: Number, required: true },
   question: { type: String, required: true },
