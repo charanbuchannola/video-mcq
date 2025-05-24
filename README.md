@@ -1,188 +1,213 @@
-# Local Lecture-to-Quiz AI
+# Lecture-to-Quiz AI (MERN + Local LLM)
 
-This full-stack MERN application enables users to upload an MP4 video lecture, automatically transcribes its content, and generates multiple-choice questions (MCQs) for every 5-minute segment. All AI processing (transcription and MCQ generation) is done locally using Whisper.cpp and a locally hosted Large Language Model (LLM) via Ollama, ensuring offline capability and data privacy.
+This project is a full-stack web application that enables users to upload an MP4 lecture video (~60 minutes), automatically transcribe its contents, and generate objective-type questions (MCQs) for every 5-minute segment. All processing—including transcription and MCQ generation—is performed locally using open-source tools and a locally hosted Large Language Model (LLM), ensuring data privacy and offline capability.
+
+---
 
 ## Features
 
-- **Video Upload:** Supports MP4 video file uploads.
-- **Local Automatic Transcription:** Transcribes video audio to text with timestamps using `Whisper.cpp`.
-- **Text Segmentation:** Divides the transcription into 5-minute segments.
-- **Local LLM-Powered MCQ Generation:** Generates MCQs for each segment using a locally run LLM (e.g., Mistral, Llama 2) via `Ollama`.
-- **Results Display:** Shows the full transcription and generated MCQs associated with video segments.
-- **Offline Capability & Data Privacy:** All core processing happens on the local machine.
+- **Video Upload:** Upload MP4 lecture videos via a web interface.
+- **Automatic Transcription:** Audio is extracted and transcribed using [Whisper.cpp](https://github.com/ggerganov/whisper.cpp).
+- **MCQ Generation:** For every 5-minute segment, MCQs are generated using a locally hosted LLM (e.g., Ollama).
+- **Full Privacy:** No data leaves your machine; all AI runs locally.
+- **Modern UI:** Built with React and Tailwind CSS.
+- **Robust Backend:** Node.js, Express, MongoDB.
 
-## Technology Stack
+---
 
-- **Frontend:** React.js, Tailwind CSS, Axios
-- **Backend:** Node.js, Express.js
-- **Database:** MongoDB (with Mongoose ODM)
-- **Video Transcription (Local):** [Whisper.cpp](https://github.com/ggerganov/whisper.cpp)
-- **LLM Hosting (Local):** [Ollama](https://ollama.ai/)
-- **File Uploads:** Multer
+## Architecture
 
-## Project Structure
+- **Frontend:** React + Vite + Tailwind CSS
+- **Backend:** Node.js + Express + MongoDB (Mongoose)
+- **Transcription:** Whisper.cpp (invoked via child process)
+- **MCQ Generation:** Local LLM (Ollama, invoked via HTTP API)
+- **File Uploads:** Multer middleware
 
-Use code with caution.
-Markdown
-local-lecture-to-quiz/
-├── backend/ # Node.js/Express backend
-├── frontend/ # React frontend
-├── local_ai_tools/ # Houses local AI tools like Whisper.cpp
-├── .gitignore
-└── README.md
+---
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed:
+- **Node.js** (v18+ recommended)
+- **npm** (comes with Node.js)
+- **MongoDB** (local or Docker)
+- **ffmpeg** (installed and in PATH)
+- **Whisper.cpp** (built locally, see below)
+- **Ollama** or another local LLM server (see below)
 
-1.  **Node.js & npm:** (LTS version recommended) [Download Node.js](https://nodejs.org/)
-2.  **MongoDB:** (Community Server) [Download MongoDB](https://www.mongodb.com/try/download/community)
-    - Ensure the MongoDB service is running (`mongod`).
-3.  **Git:** [Download Git](https://git-scm.com/downloads)
-4.  **C++ Compiler:**
-    - **Linux:** `sudo apt-get install build-essential`
-    - **macOS:** Xcode Command Line Tools (`xcode-select --install`)
-    - **Windows:** MinGW-w64 or MSVC (Using WSL is recommended for easier C++ compilation on Windows).
-5.  **(Optional) Python 3.8+**
+---
 
-## Setup & Installation
+## Getting Started
 
-### 1. Clone the Repository
+### 1. **Clone the Repository**
 
-```bash
-git clone <your-repository-url> local-lecture-to-quiz
-cd local-lecture-to-quiz
-Use code with caution.
-2. Set up Local AI Tools
-a. Whisper.cpp (Transcription)
-# Navigate to the directory for local AI tools
-mkdir -p local_ai_tools
-cd local_ai_tools
-
-# Clone Whisper.cpp
-git clone https://github.com/ggerganov/whisper.cpp.git
-cd whisper.cpp
-
-# Download a Whisper model (e.g., base.en or small.en for better accuracy)
-bash ./models/download-ggml-model.sh base.en
-# or: bash ./models/download-ggml-model.sh small.en
-
-# Compile Whisper.cpp
-make
-
-# Go back to the project root
-cd ../../
-Use code with caution.
-Bash
-b. Ollama (Local LLM Hosting)
-Download and install Ollama for your operating system from ollama.ai.
-Pull an LLM model. We recommend mistral for a good balance of performance and capability:
-ollama pull mistral
-Use code with caution.
-Bash
-Other options: ollama pull mistral:instruct or ollama pull llama2:7b-chat
-Verify Ollama is running and the model is available:
-ollama list
-Use code with caution.
-Bash
-Ollama typically serves its API at http://localhost:11434.
-3. Configure Backend
-Navigate to the backend directory:
-cd backend
-Use code with caution.
-Bash
-Install backend dependencies:
-npm install
-Use code with caution.
-Bash
-Create a .env file in the backend directory (backend/.env) and populate it with your local configuration. Update the WHISPER_CPP_PATH and WHISPER_MODEL_PATH with the absolute paths on your system.
-PORT=5000
-MONGO_URI=mongodb://localhost:27017/lecture_quiz_db
-
-# !!! IMPORTANT: Replace with ABSOLUTE paths on your system !!!
-WHISPER_CPP_PATH=/full/path/to/your/local-lecture-to-quiz/local_ai_tools/whisper.cpp/main
-WHISPER_MODEL_PATH=/full/path/to/your/local-lecture-to-quiz/local_ai_tools/whisper.cpp/models/ggml-base.en.bin # Or ggml-small.en.bin if you downloaded that
-
-OLLAMA_API_URL=http://localhost:11434/api/generate
-OLLAMA_MODEL_NAME=mistral # Or the model you pulled (e.g., mistral:instruct)
-UPLOAD_DIR=./uploads
-Use code with caution.
-Env
-Go back to the project root:
-cd ..
-Use code with caution.
-Bash
-4. Configure Frontend
-Navigate to the frontend directory:
-cd frontend
-Use code with caution.
-Bash
-Install frontend dependencies:
-npm install
-Use code with caution.
-Bash
-(The proxy for API calls during development is already set in frontend/package.json)
-Go back to the project root:
-cd ..
-Use code with caution.
-Bash
-Running the Application
-Start MongoDB: Ensure your MongoDB server is running.
-# (Command might vary based on your OS and installation)
-mongod
-Use code with caution.
-Bash
-Start Ollama Service: Ollama usually runs as a background service after installation. You can check its status or start it if necessary.
-ollama serve  # (If not running automatically)
-ollama list   # (To verify models)
-Use code with caution.
-Bash
-Start the Backend Server:
-Open a new terminal window, navigate to the backend directory, and run:
-cd backend
-npm run dev
-Use code with caution.
-Bash
-The backend server should start on http://localhost:5000 (or the port specified in your .env).
-Start the Frontend Development Server:
-Open another new terminal window, navigate to the frontend directory, and run:
-cd frontend
-npm start
-Use code with caution.
-Bash
-The React application should open in your browser, typically at http://localhost:3000.
-Usage
-Open the application in your web browser (usually http://localhost:3000).
-Click the "Choose File" button to select an MP4 video lecture.
-Click "Upload and Process."
-The application will display the video ID and processing status. This includes:
-Uploading the file.
-Transcribing the video (can take several minutes depending on video length and your CPU).
-Generating MCQs for each 5-minute segment (can also take time depending on the LLM and segment count).
-Once processing is complete, the full transcription and generated MCQs will be displayed.
-Troubleshooting
-Whisper.cpp Path Errors: Double-check the WHISPER_CPP_PATH and WHISPER_MODEL_PATH in backend/.env. They must be absolute paths.
-Ollama Not Responding: Ensure Ollama service is running and the model specified in OLLAMA_MODEL_NAME is pulled (ollama list). Check http://localhost:11434 in your browser.
-MongoDB Connection Issues: Verify MongoDB is running and accessible at the MONGO_URI specified.
-Long Processing Times: Transcription and LLM inference are computationally intensive. For a 60-minute lecture, expect significant processing time. Smaller Whisper models (like base.en) are faster but less accurate than larger ones (small.en, medium.en).
-Permissions: Ensure the backend has write permissions to the backend/uploads directory.
-LLM JSON Output: If MCQs are not generating correctly, check the backend console for errors from llmService.js. The LLM might occasionally produce malformed JSON. Prompt engineering or retries might be needed for robustness.
-Future Enhancements (Ideas)
-User authentication.
-Option to save/export generated quizzes.
-More sophisticated text segmentation (e.g., by topic).
-Choice of different LLMs or Whisper models via UI.
-Job queue for handling long-running processing tasks more robustly.
-Progress bars for transcription and MCQ generation stages.
-Option to edit/delete generated MCQs.
-Contributing
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
-License
-MIT
-**Remember to:**
-
-1.  Replace `<https://github.com/charanbuchannola/video-mcq>` with the actual URL if you host this on GitHub/GitLab.
-2.  Create a `LICENSE` file in your project root (e.g., with MIT License text) if you specify a license like MIT.
-
-This `README.md` provides a good overview for anyone looking to understand, set up, and run your project.
+```sh
+git clone https://github.com/yourusername/lecture-to-quiz-ai.git
+cd lecture-to-quiz-ai
 ```
+
+### 2. **Backend Setup**
+
+```sh
+cd backend
+npm install
+```
+
+#### **Environment Variables**
+
+Create a `.env` file in the `backend` folder:
+
+```env
+PORT=5000
+MONGODB_URI=mongodb://localhost:27017/lecture2quiz
+WHISPER_CPP_PATH=C:/path/to/whisper.cpp/main.exe
+WHISPER_MODEL_PATH=C:/path/to/whisper.cpp/models/ggml-base.en.bin
+FFMPEG_COMMAND=ffmpeg
+OLLAMA_API_URL=http://localhost:11434/api/generate
+OLLAMA_MODEL_NAME=llama3
+UPLOAD_DIR=uploads
+```
+
+- Adjust paths as needed for your system.
+
+#### **Start MongoDB**
+
+Make sure MongoDB is running locally.
+
+#### **Start Backend**
+
+```sh
+npm start
+```
+
+---
+
+### 3. **Frontend Setup**
+
+```sh
+cd ../frontend
+npm install
+```
+
+#### **Configure API URL**
+
+If your backend runs on a different port or host, update `src/services/api.js`:
+
+```js
+const API_BASE_URL = "http://localhost:5000/api";
+```
+
+#### **Start Frontend**
+
+```sh
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173) in your browser.
+
+---
+
+### 4. **Local AI Tools Setup**
+
+#### **Whisper.cpp**
+
+- Download and build [Whisper.cpp](https://github.com/ggerganov/whisper.cpp) for your OS.
+- Download the English model (e.g., `ggml-base.en.bin`) and place it in the `models` folder.
+- Update `WHISPER_CPP_PATH` and `WHISPER_MODEL_PATH` in your `.env`.
+
+#### **Ollama (or other LLM)**
+
+- Install [Ollama](https://ollama.com/) and pull a model (e.g., `ollama pull llama3`).
+- Start the Ollama server.
+- Ensure `OLLAMA_API_URL` and `OLLAMA_MODEL_NAME` in your `.env` are correct.
+
+---
+
+## Usage
+
+1. **Upload a video** via the web UI.
+2. **Wait for processing** (status updates shown).
+3. **View results:** Full transcription and MCQs for each 5-minute segment.
+
+---
+
+## Project Structure
+
+```
+backend/
+  src/
+    controllers/
+    db/
+    middleware/
+    models/
+    routes/
+    services/
+    uploads/
+  .env
+  package.json
+  server.js
+
+frontend/
+  src/
+    components/
+    services/
+    App.jsx
+    index.css
+    main.jsx
+  vite.config.js
+  package.json
+```
+
+---
+
+## API Endpoints
+
+- `POST /api/videos/upload` — Upload a video file (form field: `videoFile`)
+- `GET /api/videos/:id/status` — Get processing status
+- `GET /api/videos/:id/results` — Get transcription and MCQs
+
+---
+
+## Customization
+
+- **Segment Length:** Change the segment duration in `segmentTranscription` (default: 5 minutes).
+- **MCQ Prompt:** Edit the prompt in `backend/src/services/llmService.js` for different question styles.
+- **Frontend Styling:** Tweak Tailwind classes in `frontend/src/components`.
+
+---
+
+## Troubleshooting
+
+- **CORS errors:** Ensure backend CORS is set to allow your frontend origin.
+- **ffmpeg/Whisper/Ollama not found:** Double-check paths in `.env`.
+- **MongoDB connection issues:** Make sure MongoDB is running and URI is correct.
+
+---
+
+## License
+
+MIT
+
+---
+
+## Credits
+
+- [Whisper.cpp](https://github.com/ggerganov/whisper.cpp)
+- [Ollama](https://ollama.com/)
+- [React](https://react.dev/)
+- [Vite](https://vitejs.dev/)
+- [Tailwind CSS](https://tailwindcss.com/)
+- [Node.js](https://nodejs.org/)
+- [Express](https://expressjs.com/)
+- [MongoDB](https://www.mongodb.com/)
+
+---
+
+## Screenshots
+
+*(Add screenshots of your UI and results here!)*
+
+---
+
+## Author
+
+- [BUCHANNOLA CHARAN](https://github.com/charanbuchannola/video-mcq)
