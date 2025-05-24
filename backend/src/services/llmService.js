@@ -1,94 +1,114 @@
+// backend/services/llmService.js
 const axios = require("axios");
 
 const OLLAMA_API_URL = process.env.OLLAMA_API_URL;
 const OLLAMA_MODEL_NAME = process.env.OLLAMA_MODEL_NAME;
 
 async function generateMCQs(textSegment) {
-  if (!textSegment || textSegment.trim() === "") {
+  if (!textSegment || textSegment.trim().length < 20) {
+    // Min length for text
     console.warn(
-      "LLMService: Received empty text segment, skipping MCQ generation."
+      "[LLMService] Received short/empty text segment, skipping MCQ generation."
     );
-    return []; // Return empty array if segment is empty
+    return [];
   }
   const prompt = `Context: "${textSegment}"
+
 Based ONLY on the context provided above, generate exactly 3 multiple-choice questions (MCQs).
 Each MCQ must have:
-A "question" statement.
-An "options" array containing exactly 4 string choices (A, B, C, D).
-A "correctAnswer" field indicating the letter of the correct option (e.g., "A", "B", "C", or "D").
+1. A "question" statement.
+2. An "options" array containing exactly 4 distinct string choices.
+3. A "correctAnswer" field indicating the letter of the correct option (e.g., "A", "B", "C", or "D").
+
 Format the output as a VALID JSON array of objects. For example:
 [
-{
-"question": "What is the main topic discussed?",
-"options": ["Topic X", "Topic Y", "Topic Z", "Topic W"],
-"correctAnswer": "A"
-},
-{
-// ... next question ...
-}
+  {
+    "question": "What is the main topic discussed?",
+    "options": ["Topic X", "Topic Y", "Topic Z", "Topic W"],
+    "correctAnswer": "A"
+  },
+  {
+    "question": "Which concept is explained in detail?",
+    "options": ["Concept 1", "Concept 2", "Concept 3", "Concept 4"],
+    "correctAnswer": "C"
+  }
 ]
-Ensure the JSON is well-formed and can be parsed directly. Do not include any text outside the JSON array.
+Ensure the JSON is well-formed and can be parsed directly. Do not include any text or explanation outside the JSON array.
 `;
 
   try {
     console.log(
-      `Sending prompt to Ollama for segment starting with: "${textSegment.substring(
+      `[LLMService] Sending prompt to Ollama (${OLLAMA_MODEL_NAME}) for segment starting with: "${textSegment.substring(
         0,
-        100
+        70
       )}..."`
     );
     const response = await axios.post(OLLAMA_API_URL, {
       model: OLLAMA_MODEL_NAME,
       prompt: prompt,
-      stream: false, // Get the full response at once
-      format: "json", // Request JSON output format from Ollama
+      stream: false,
+      format: "json",
     });
 
-    console.log("Ollama raw response:", response.data.response); // Log raw response string
+    // console.log("[LLMService] Ollama raw response string:", response.data.response); // Log for debugging
 
     if (response.data && response.data.response) {
-      // The 'response' field from Ollama with format: 'json' should be a stringified JSON
       try {
-        const mcqs = JSON.parse(response.data.response);
+        const mcqsParsed = JSON.parse(response.data.response);
 
-        // Accept both a single MCQ object and an array of MCQs
-        if (Array.isArray(mcqs) && mcqs.every((q) => q.question && q.options && q.correctAnswer)) {
-          return mcqs;
-        } else if (mcqs && mcqs.question && mcqs.options && mcqs.correctAnswer) {
-          // Single MCQ object, wrap in array
-          return [mcqs];
-        } else {
-          console.error(
-            "LLM response is not in the expected MCQ array/object format:",
-            mcqs
+        // Handle both array of MCQs and single MCQ object
+        const mcqsArray = Array.isArray(mcqsParsed) ? mcqsParsed : [mcqsParsed];
+
+        const validMcqs = mcqsArray.filter(
+          (q) =>
+            q &&
+            q.question &&
+            Array.isArray(q.options) &&
+            q.options.length === 4 &&
+            q.correctAnswer
+        );
+
+        if (validMcqs.length !== mcqsArray.length) {
+          console.warn(
+            "[LLMService] Some MCQs from LLM had invalid structure and were filtered out."
           );
-          throw new Error("LLM response format error: Invalid MCQ structure.");
         }
+        if (validMcqs.length === 0 && mcqsArray.length > 0) {
+          console.error(
+            "[LLMService] LLM response parsed but no valid MCQs found. Parsed:",
+            mcqsParsed
+          );
+        }
+
+        return validMcqs;
       } catch (parseError) {
-        console.error("Error parsing LLM JSON response:", parseError);
         console.error(
-          "Problematic LLM response string:",
+          "[LLMService] Error parsing LLM JSON response:",
+          parseError
+        );
+        console.error(
+          "[LLMService] Problematic LLM response string:",
           response.data.response
         );
         throw new Error(
-          `Failed to parse LLM response as JSON. Raw response: ${response.data.response.substring(
+          `Failed to parse LLM response. Raw: ${response.data.response.substring(
             0,
-            500
+            200
           )}`
         );
       }
     } else {
       console.error(
-        "Invalid or empty response structure from Ollama:",
+        "[LLMService] Invalid or empty response structure from Ollama:",
         response.data
       );
       throw new Error("Invalid response structure from LLM service");
     }
   } catch (error) {
-    console.error(
-      "Error calling Ollama service:",
-      error.response ? error.response.data : error.message
-    );
+    const errMsg = error.response
+      ? JSON.stringify(error.response.data)
+      : error.message;
+    console.error("[LLMService] Error calling Ollama service:", errMsg);
     throw new Error(`LLM MCQ generation failed: ${error.message}`);
   }
 }

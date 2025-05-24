@@ -1,3 +1,4 @@
+// backend/controllers/videoController.js
 const Video = require("../models/videoModel");
 const Transcription = require("../models/transcriptionModel");
 const MCQ = require("../models/mcqModel");
@@ -12,29 +13,27 @@ exports.uploadVideo = async (req, res) => {
       .status(400)
       .json({ message: "No file uploaded or file type incorrect." });
   }
-
   const video = new Video({
     originalFilename: req.file.originalname,
     filename: req.file.filename,
-    path: req.file.path, // Full path from multer
-    status: "uploaded",
+    path: req.file.path,
   });
-
   try {
     await video.save();
     res.status(201).json({
       message: "Video uploaded successfully. Processing started.",
       videoId: video._id,
     });
-
-    // --- Start processing asynchronously ---
-    processVideo(video._id); // Don't await this
+    processVideo(video._id);
   } catch (error) {
-    console.error("Error saving video record:", error);
-    // Clean up uploaded file if DB save fails
+    console.error(`[${video._id || "N/A"}] Error saving video record:`, error);
     if (req.file && req.file.path) {
       fs.unlink(req.file.path, (err) => {
-        if (err) console.error("Error deleting orphaned file:", err);
+        if (err)
+          console.error(
+            `[${video._id || "N/A"}] Error deleting orphaned file:`,
+            err
+          );
       });
     }
     res
@@ -48,103 +47,144 @@ async function processVideo(videoId) {
   try {
     video = await Video.findById(videoId);
     if (!video) {
-      console.error(`Video not found for processing: ${videoId}`);
+      console.error(`[${videoId}] Video not found for processing.`);
       return;
     }
+
+    console.log(
+      `[${videoId}] Starting full processing for ${video.originalFilename}`
+    );
 
     // 1. Transcription
     video.status = "transcribing";
     await video.save();
-    console.log(`Starting transcription for ${video.originalFilename}`);
-
+    console.log(`[${videoId}] Starting transcription...`);
     const { vttContent, vttFilePath } =
       await transcriptionService.transcribeVideo(video.path);
     const parsedVttSegments = transcriptionService.parseVTT(vttContent);
 
+    if (!parsedVttSegments || parsedVttSegments.length === 0) {
+      throw new Error("Transcription VTT parsing resulted in zero segments.");
+    }
+    console.log(
+      `[${videoId}] Parsed ${parsedVttSegments.length} raw VTT segments.`
+    );
+
     const fullTranscriptionText = parsedVttSegments
       .map((s) => s.text)
       .join(" ");
-    const fiveMinSegments = transcriptionService.segmentTranscription(
+    const fiveMinChunkedSegments = transcriptionService.segmentTranscription(
       parsedVttSegments,
       5
+    ); // VTT time strings
+
+    console.log(
+      `[${videoId}] Segmented transcription into ${fiveMinChunkedSegments.length} 5-minute chunks.`
     );
 
-    // Convert times to numbers for MongoDB
-    const segmentsForDb = fiveMinSegments.map((s) => ({
-      startTime: transcriptionService.vttTimeToSeconds(s.startTime),
-      endTime: transcriptionService.vttTimeToSeconds(s.endTime),
+    // Convert VTT time strings to seconds for DB and MCQ generation
+    const segmentsForDbAndMcq = fiveMinChunkedSegments.map((s) => ({
+      startTime: transcriptionService.vttTimeToSeconds(s.startTime), // Now Number
+      endTime: transcriptionService.vttTimeToSeconds(s.endTime), // Now Number
       text: s.text,
     }));
 
     const transcription = new Transcription({
       videoId: video._id,
       fullText: fullTranscriptionText,
-      segments: segmentsForDb,
+      segments: segmentsForDbAndMcq, // Store segments with numeric times
     });
     await transcription.save();
     video.transcriptionId = transcription._id;
-    console.log(`Transcription complete for ${video.originalFilename}`);
+    console.log(`[${videoId}] Transcription complete and saved.`);
 
-    // Optionally delete the VTT file after processing
-    if (fs.existsSync(vttFilePath)) {
+    if (vttFilePath && fs.existsSync(vttFilePath)) {
       fs.unlink(vttFilePath, (err) => {
-        if (err) console.error(`Error deleting VTT file ${vttFilePath}:`, err);
-        else console.log(`Deleted VTT file: ${vttFilePath}`);
+        if (err)
+          console.error(
+            `[${videoId}] Error deleting VTT file ${vttFilePath}:`,
+            err
+          );
+        else console.log(`[${videoId}] Deleted VTT file: ${vttFilePath}`);
       });
     }
 
     // 2. MCQ Generation
     video.status = "generating_mcqs";
     await video.save();
-    console.log(`Starting MCQ generation for ${video.originalFilename}`);
+    console.log(
+      `[${videoId}] Starting MCQ generation for ${segmentsForDbAndMcq.length} segments...`
+    );
 
-    const generatedMcqs = [];
-    for (const segment of segmentsForDb) {
+    const generatedMcqIds = [];
+    for (let i = 0; i < segmentsForDbAndMcq.length; i++) {
+      const segment = segmentsForDbAndMcq[i];
+      console.log(
+        `[${videoId}] Processing segment ${i + 1}/${
+          segmentsForDbAndMcq.length
+        } for MCQs: ${segment.startTime.toFixed(
+          0
+        )}s - ${segment.endTime.toFixed(0)}s`
+      );
+
       if (!segment.text || segment.text.trim().length < 50) {
-        // Skip very short segments
-        console.log(
-          `Skipping MCQ generation for short segment: ${segment.startTime}s - ${segment.endTime}s`
+        console.warn(
+          `[${videoId}] Segment ${i + 1} too short, skipping MCQ generation.`
         );
         continue;
       }
       try {
-        const mcqsForSegment = await llmService.generateMCQs(segment.text);
+        const mcqsForSegment = await llmService.generateMCQs(segment.text); // Returns array
         for (const mcqData of mcqsForSegment) {
+          // mcqsForSegment is already an array from llmService
           const newMcq = new MCQ({
             videoId: video._id,
-            segmentStartTime: segment.startTime,
-            segmentEndTime: segment.endTime,
-            ...mcqData, // spread question, options, correctAnswer
+            segmentStartTime: segment.startTime, // Already number
+            segmentEndTime: segment.endTime, // Already number
+            ...mcqData,
           });
           await newMcq.save();
-          generatedMcqs.push(newMcq._id);
+          generatedMcqIds.push(newMcq._id);
         }
+        console.log(
+          `[${videoId}] Generated ${mcqsForSegment.length} MCQs for segment ${
+            i + 1
+          }.`
+        );
       } catch (mcqError) {
         console.error(
-          `Error generating MCQs for segment ${segment.startTime}-${segment.endTime}:`,
+          `[${videoId}] Error generating MCQs for segment ${
+            i + 1
+          } (${segment.startTime.toFixed(0)}s-${segment.endTime.toFixed(0)}s):`,
           mcqError.message
         );
-        // Decide if you want to mark video as failed or just log and continue
       }
     }
-    video.mcqs = generatedMcqs;
+    video.mcqs = generatedMcqIds;
     video.status = "completed";
-    console.log(`MCQ generation complete for ${video.originalFilename}`);
+    console.log(
+      `[${videoId}] MCQ generation complete. Total MCQs: ${generatedMcqIds.length}.`
+    );
     await video.save();
   } catch (error) {
-    console.error(`Error processing video ${videoId}:`, error);
+    console.error(
+      `[${videoId || "N/A"}] Critical error processing video:`,
+      error
+    );
     if (video) {
       video.status = "failed";
-      video.errorMessage = error.message;
+      video.errorMessage = error.message.substring(0, 500);
       await video.save();
     }
   } finally {
-    // Optional: Clean up the original uploaded video file after processing
-    // if (video && video.path && video.status === 'completed') {
+    // Optional cleanup:
+    // if (video && video.path && (video.status === 'completed' || video.status === 'failed')) {
+    //   if (fs.existsSync(video.path)) {
     //     fs.unlink(video.path, (err) => {
-    //         if (err) console.error("Error deleting processed video file:", err);
-    //         else console.log(`Deleted processed video file: ${video.path}`);
+    //       if (err) console.error(`[${videoId}] Error deleting original video file:`, err);
+    //       else console.log(`[${videoId}] Deleted original video file: ${video.path}`);
     //     });
+    //   }
     // }
   }
 }
@@ -168,8 +208,8 @@ exports.getVideoStatus = async (req, res) => {
 exports.getVideoResults = async (req, res) => {
   try {
     const video = await Video.findById(req.params.id)
-      .populate("transcriptionId")
-      .populate("mcqs");
+      .populate({ path: "transcriptionId", model: "Transcription" }) // Explicitly specify model
+      .populate({ path: "mcqs", model: "MCQ" }); // Explicitly specify model
 
     if (!video) {
       return res.status(404).json({ message: "Video not found." });
@@ -180,7 +220,6 @@ exports.getVideoResults = async (req, res) => {
         status: video.status,
       });
     }
-
     res.json({
       video: {
         _id: video._id,
@@ -188,10 +227,11 @@ exports.getVideoResults = async (req, res) => {
         status: video.status,
         uploadDate: video.uploadDate,
       },
-      transcription: video.transcriptionId, // This will be the populated object
-      mcqs: video.mcqs, // This will be the populated array of MCQ objects
+      transcription: video.transcriptionId,
+      mcqs: video.mcqs,
     });
   } catch (error) {
+    console.error("Error fetching video results:", error);
     res
       .status(500)
       .json({ message: "Error fetching video results.", error: error.message });
