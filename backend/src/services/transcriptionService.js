@@ -1,10 +1,13 @@
-// backend/services/transcriptionService.js
 const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
 const WHISPER_CPP_PATH = process.env.WHISPER_CPP_PATH;
 const WHISPER_MODEL_PATH = process.env.WHISPER_MODEL_PATH;
+
+// Set your ffmpeg absolute path here
+const FFMPEG_PATH =
+  "C:/Users/buchannola charan/OneDrive/Desktop/ffmpeg-7.0.2-essentials_build/ffmpeg-7.0.2-essentials_build/bin/ffmpeg.exe";
 
 async function transcribeVideo(videoPath) {
   return new Promise((resolve, reject) => {
@@ -19,125 +22,194 @@ async function transcribeVideo(videoPath) {
         new Error(`Whisper model not found: ${WHISPER_MODEL_PATH}`)
       );
 
-    const outputFileName = path.basename(videoPath, path.extname(videoPath));
-    const outputDir = path.dirname(videoPath);
-    const vttFilePath = path.join(outputDir, `${outputFileName}.vtt`);
+    // --- Extract audio to WAV ---
+    const audioPath = videoPath.replace(path.extname(videoPath), ".wav");
+    if (!fs.existsSync(audioPath)) {
+      const ffmpeg = spawn(FFMPEG_PATH, [
+        "-i",
+        videoPath,
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-f",
+        "wav",
+        audioPath,
+      ]);
+      ffmpeg.stderr.on("data", (data) => {
+        // Optionally log ffmpeg output
+        console.error(`ffmpeg stderr: ${data}`);
+      });
+      ffmpeg.on("close", (code) => {
+        if (code !== 0) {
+          return reject(new Error("Failed to extract audio with ffmpeg"));
+        }
+        runWhisper(audioPath);
+      });
+      ffmpeg.on("error", (err) => {
+        return reject(new Error("Failed to start ffmpeg: " + err.message));
+      });
+    } else {
+      runWhisper(audioPath);
+    }
 
-    const whisperArgs = [
-      "-m",
-      WHISPER_MODEL_PATH,
-      "-f",
-      videoPath,
-      "-l",
-      "en",
-      "-ovtt",
-      "-t",
-      "4", // Threads, adjust based on CPU
-      "-p",
-      "1", // Processors, adjust based on CPU
-    ];
+    function runWhisper(audioFile) {
+      const outputFileName = path.basename(audioFile, path.extname(audioFile));
+      const outputDir = path.dirname(audioFile);
 
-    console.log(
-      `Spawning Whisper: ${WHISPER_CPP_PATH} ${whisperArgs.join(" ")}`
-    );
-    const whisperProcess = spawn(WHISPER_CPP_PATH, whisperArgs);
-    let stderrData = "";
+      // Try both possible VTT file names
+      const vttFilePath1 = path.join(outputDir, `${outputFileName}.vtt`);
+      const vttFilePath2 = path.join(
+        outputDir,
+        `${outputFileName}${path.extname(audioFile)}.vtt`
+      );
 
-    whisperProcess.stdout.on("data", (data) =>
-      console.log(`Whisper stdout: ${data}`)
-    );
-    whisperProcess.stderr.on("data", (data) => {
-      stderrData += data.toString();
-      console.error(`Whisper stderr: ${data}`);
-    });
+      const whisperArgs = [
+        "-m",
+        WHISPER_MODEL_PATH,
+        "-f",
+        audioFile,
+        "-l",
+        "en",
+        "-ovtt",
+        "-t",
+        "4",
+        "-p",
+        "1",
+      ];
 
-    whisperProcess.on("close", (code) => {
-      if (code === 0) {
-        if (fs.existsSync(vttFilePath)) {
-          const vttContent = fs.readFileSync(vttFilePath, "utf-8");
-          resolve({ vttContent, vttFilePath });
+      const whisperProcess = spawn(WHISPER_CPP_PATH, whisperArgs);
+      let stderrData = "";
+
+      whisperProcess.stdout.on("data", (data) =>
+        console.log(`Whisper stdout: ${data}`)
+      );
+      whisperProcess.stderr.on("data", (data) => {
+        stderrData += data.toString();
+        console.error(`Whisper stderr: ${data}`);
+      });
+
+      whisperProcess.on("close", (code) => {
+        if (code === 0) {
+          let vttContent = null;
+          let vttFilePath = null;
+          if (fs.existsSync(vttFilePath1)) {
+            vttContent = fs.readFileSync(vttFilePath1, "utf-8");
+            vttFilePath = vttFilePath1;
+          } else if (fs.existsSync(vttFilePath2)) {
+            vttContent = fs.readFileSync(vttFilePath2, "utf-8");
+            vttFilePath = vttFilePath2;
+          }
+
+          if (vttContent) {
+            resolve({ vttContent, vttFilePath });
+          } else {
+            reject(
+              new Error(
+                `VTT file not found: ${vttFilePath1} or ${vttFilePath2}. Stderr: ${stderrData}`
+              )
+            );
+          }
         } else {
           reject(
             new Error(
-              `VTT file not found: ${vttFilePath}. Stderr: ${stderrData}`
+              `Transcription failed (code ${code}). Stderr: ${stderrData}`
             )
           );
         }
-      } else {
+      });
+      whisperProcess.on("error", (err) =>
         reject(
-          new Error(
-            `Transcription failed (code ${code}). Stderr: ${stderrData}`
-          )
-        );
-      }
-    });
-    whisperProcess.on("error", (err) =>
-      reject(new Error("Failed to start transcription process: " + err.message))
-    );
+          new Error("Failed to start transcription process: " + err.message)
+        )
+      );
+    }
   });
 }
 
+// Simple VTT parser: returns array of { startTime, endTime, text }
 function parseVTT(vttContent) {
-  const lines = vttContent.split("\n");
+  const lines = vttContent.split(/\r?\n/);
   const segments = [];
-  let currentSegment = null;
-  const timeToSeconds = (timeStr) => {
-    const [hms, msPart] = timeStr.split(".");
-    const [h, m, s] = hms.split(":").map(parseFloat);
-    return h * 3600 + m * 60 + s + (msPart ? parseFloat(msPart) / 1000 : 0);
-  };
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    if (trimmedLine.includes("-->")) {
-      if (currentSegment && currentSegment.text) segments.push(currentSegment);
-      const [start, end] = trimmedLine.split(" --> ");
-      currentSegment = {
-        startTime: timeToSeconds(start),
-        endTime: timeToSeconds(end),
-        text: "",
-      };
-    } else if (
-      currentSegment &&
-      trimmedLine &&
-      !trimmedLine.startsWith("WEBVTT") &&
-      !/^\d+$/.test(trimmedLine)
-    ) {
-      currentSegment.text += (currentSegment.text ? " " : "") + trimmedLine;
+  let current = null;
+
+  for (let line of lines) {
+    line = line.trim();
+    // Match timecode lines
+    const match = line.match(
+      /^(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})/
+    );
+    if (match) {
+      if (current) segments.push(current);
+      current = { startTime: match[1], endTime: match[2], text: "" };
+    } else if (current && line) {
+      current.text += (current.text ? " " : "") + line;
     }
   }
-  if (currentSegment && currentSegment.text) segments.push(currentSegment);
+  if (current) segments.push(current);
   return segments;
 }
 
-function segmentTranscription(parsedVttSegments, intervalMinutes = 5) {
-  const intervalSeconds = intervalMinutes * 60;
-  if (!parsedVttSegments || parsedVttSegments.length === 0) return [];
-  const groupedSegments = [];
-  let currentGroupStartTime = 0;
-  let currentGroupText = "";
-
-  for (const segment of parsedVttSegments) {
-    const segmentGroupStart =
-      Math.floor(segment.startTime / intervalSeconds) * intervalSeconds;
-    if (currentGroupText && segmentGroupStart > currentGroupStartTime) {
-      groupedSegments.push({
-        startTime: currentGroupStartTime,
-        endTime: currentGroupStartTime + intervalSeconds,
-        text: currentGroupText.trim(),
-      });
-      currentGroupText = "";
-    }
-    currentGroupStartTime = segmentGroupStart;
-    currentGroupText += (currentGroupText ? " " : "") + segment.text;
-  }
-  if (currentGroupText) {
-    groupedSegments.push({
-      startTime: currentGroupStartTime,
-      endTime: currentGroupStartTime + intervalSeconds,
-      text: currentGroupText.trim(),
-    });
-  }
-  return groupedSegments;
+// Convert VTT time string to seconds (number)
+function vttTimeToSeconds(ts) {
+  const [h, m, s] = ts.split(":");
+  const [sec, ms] = s.split(".");
+  return (
+    parseInt(h) * 3600 +
+    parseInt(m) * 60 +
+    parseInt(sec) +
+    (ms ? parseInt(ms) / 1000 : 0)
+  );
 }
 
-module.exports = { transcribeVideo, parseVTT, segmentTranscription };
+// Segments parsed VTT into N-minute chunks
+function segmentTranscription(segments, minutes = 5) {
+  const result = [];
+  let currentStart = null;
+  let currentEnd = null;
+  let currentText = [];
+
+  function toSeconds(ts) {
+    const [h, m, s] = ts.split(":");
+    const [sec, ms] = s.split(".");
+    return (
+      parseInt(h) * 3600 +
+      parseInt(m) * 60 +
+      parseInt(sec) +
+      (ms ? parseInt(ms) / 1000 : 0)
+    );
+  }
+
+  for (const seg of segments) {
+    if (!currentStart) currentStart = seg.startTime;
+    currentEnd = seg.endTime;
+    currentText.push(seg.text);
+
+    if (toSeconds(currentEnd) - toSeconds(currentStart) >= minutes * 60) {
+      result.push({
+        startTime: currentStart,
+        endTime: currentEnd,
+        text: currentText.join(" "),
+      });
+      currentStart = null;
+      currentEnd = null;
+      currentText = [];
+    }
+  }
+  // Push any remaining text as the last segment
+  if (currentText.length > 0) {
+    result.push({
+      startTime: currentStart,
+      endTime: currentEnd,
+      text: currentText.join(" "),
+    });
+  }
+  return result;
+}
+
+module.exports = {
+  transcribeVideo,
+  parseVTT,
+  segmentTranscription,
+  vttTimeToSeconds,
+};

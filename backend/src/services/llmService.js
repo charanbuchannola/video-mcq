@@ -50,15 +50,16 @@ Ensure the JSON is well-formed and can be parsed directly. Do not include any te
       // The 'response' field from Ollama with format: 'json' should be a stringified JSON
       try {
         const mcqs = JSON.parse(response.data.response);
-        // Basic validation
-        if (
-          Array.isArray(mcqs) &&
-          mcqs.every((q) => q.question && q.options && q.correctAnswer)
-        ) {
+
+        // Accept both a single MCQ object and an array of MCQs
+        if (Array.isArray(mcqs) && mcqs.every((q) => q.question && q.options && q.correctAnswer)) {
           return mcqs;
+        } else if (mcqs && mcqs.question && mcqs.options && mcqs.correctAnswer) {
+          // Single MCQ object, wrap in array
+          return [mcqs];
         } else {
           console.error(
-            "LLM response is not in the expected MCQ array format:",
+            "LLM response is not in the expected MCQ array/object format:",
             mcqs
           );
           throw new Error("LLM response format error: Invalid MCQ structure.");

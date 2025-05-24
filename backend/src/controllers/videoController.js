@@ -1,4 +1,3 @@
-
 const Video = require("../models/videoModel");
 const Transcription = require("../models/transcriptionModel");
 const MCQ = require("../models/mcqModel");
@@ -70,15 +69,17 @@ async function processVideo(videoId) {
       5
     );
 
+    // Convert times to numbers for MongoDB
+    const segmentsForDb = fiveMinSegments.map((s) => ({
+      startTime: transcriptionService.vttTimeToSeconds(s.startTime),
+      endTime: transcriptionService.vttTimeToSeconds(s.endTime),
+      text: s.text,
+    }));
+
     const transcription = new Transcription({
       videoId: video._id,
       fullText: fullTranscriptionText,
-      segments: fiveMinSegments.map((s) => ({
-        // Store the 5-min summary segments
-        startTime: s.startTime,
-        endTime: s.endTime,
-        text: s.text,
-      })),
+      segments: segmentsForDb,
     });
     await transcription.save();
     video.transcriptionId = transcription._id;
@@ -98,7 +99,7 @@ async function processVideo(videoId) {
     console.log(`Starting MCQ generation for ${video.originalFilename}`);
 
     const generatedMcqs = [];
-    for (const segment of fiveMinSegments) {
+    for (const segment of segmentsForDb) {
       if (!segment.text || segment.text.trim().length < 50) {
         // Skip very short segments
         console.log(
